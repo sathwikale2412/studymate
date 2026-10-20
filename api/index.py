@@ -10,11 +10,23 @@ retrieved passages instead of invented prose, and says so in `mode`.
 """
 
 import os
+import time
+import uuid
 
 import requests
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+
+def _ref():
+    """A handle for the caller to quote, so the detail can stay in the platform log.
+
+    A requests exception message repeats the full URL it was aimed at, which for the
+    translation and model calls embeds the API key in the query string. Nothing that
+    reaches this response may contain it.
+    """
+    return uuid.uuid4().hex[:8]
 
 MYMEMORY_ENDPOINT = 'https://api.mymemory.translated.net/get'
 # MyMemory rejects anything longer than about this in one request.
@@ -26,6 +38,41 @@ LLM_MODEL = os.environ.get('LLM_MODEL', '')
 
 MAX_PASSAGES = 6
 MAX_PASSAGE_CHARS = 1200
+MAX_QUESTION_CHARS = 4000
+
+# These services are reachable by anyone who opens the site, and /answer spends a real
+# language-model call. The counter lives in one warm instance, so it is a brake on a
+# scripted visitor rather than a guarantee — Vercel runs many instances and a stateless
+# function cannot share one.
+RATE_WINDOW_SECONDS = 60
+RATE_MAX_REQUESTS = 30
+
+_hits: dict[str, list[float]] = {}
+
+
+def _caller_key():
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    first = forwarded.split(',')[0].strip()
+    return first or request.remote_addr or 'unknown'
+
+
+def rate_limited(key):
+    now = time.time()
+    hits = [seen for seen in _hits.get(key, []) if now - seen < RATE_WINDOW_SECONDS]
+    if len(hits) >= RATE_MAX_REQUESTS:
+        _hits[key] = hits
+        return True
+    hits.append(now)
+    _hits[key] = hits
+    return False
+
+
+def _too_much():
+    return jsonify({
+        'status': 'error',
+        'message': f'Too many requests from this address. Wait {RATE_WINDOW_SECONDS} seconds.',
+        'ref': _ref(),
+    }), 429
 
 
 def _body():
@@ -144,10 +191,17 @@ def gateway(path):
         })
 
     if action == 'answer':
+        if rate_limited(_caller_key()):
+            return _too_much()
         data = _body()
         question = str(data.get('question', '')).strip()
         if not question:
             return jsonify({'status': 'error', 'message': 'Ask a question first.'}), 400
+        if len(question) > MAX_QUESTION_CHARS:
+            return jsonify({
+                'status': 'error',
+                'message': f'Keep a question under {MAX_QUESTION_CHARS} characters.',
+            }), 413
         passages = _clean_passages(data.get('passages'))
         if not passages:
             return jsonify({
@@ -164,17 +218,22 @@ def gateway(path):
                 answer, used = _extractive_answer(question, passages)
                 mode = 'extractive'
             return jsonify({'status': 'ok', 'mode': mode, 'answer': answer, 'passages': used})
-        except Exception as err:  # noqa: BLE001 - the browser must get a reason, not a stack
+        except Exception as err:  # noqa: BLE001 - the browser gets a reason, never a stack
+            reference = _ref()
+            app.logger.error('model call failed (ref %s): %s', reference, err)
             answer, used = _extractive_answer(question, passages)
             return jsonify({
                 'status': 'ok',
                 'mode': 'extractive',
                 'answer': answer,
                 'passages': used,
-                'warning': f'The language model call failed ({type(err).__name__}); showing the source passages instead.',
+                'warning': 'The language model did not answer, so this is the source passages instead.',
+                'ref': reference,
             })
 
     if action == 'translate':
+        if rate_limited(_caller_key()):
+            return _too_much()
         data = _body()
         text = str(data.get('text', '')).strip()
         target = (str(data.get('target', 'en')).strip().lower() or 'en')
@@ -187,12 +246,17 @@ def gateway(path):
             translated = translate(text, source, target)
             return jsonify({'status': 'ok', 'translated': translated, 'target': target})
         except Exception as err:  # noqa: BLE001
+            reference = _ref()
+            app.logger.error('translation failed (ref %s): %s', reference, err)
             return jsonify({
                 'status': 'error',
-                'message': f'Translation failed: {type(err).__name__}: {err}',
+                'message': 'The translation service did not answer. Try again shortly.',
+                'ref': reference,
             }), 502
 
     if action == 'flowchart':
+        if rate_limited(_caller_key()):
+            return _too_much()
         code = str(_body().get('code', ''))
         if not code.strip():
             return jsonify({'status': 'error', 'message': 'Paste some Python code first.'}), 400
@@ -204,6 +268,12 @@ def gateway(path):
         except SyntaxError as err:
             return jsonify({'status': 'error', 'message': f'Not valid Python: {err}'}), 400
         except Exception as err:  # noqa: BLE001
-            return jsonify({'status': 'error', 'message': f'Could not build a flowchart: {type(err).__name__}: {err}'}), 422
+            reference = _ref()
+            app.logger.error('flowchart failed (ref %s): %s', reference, err)
+            return jsonify({
+                'status': 'error',
+                'message': 'That code could not be turned into a flowchart.',
+                'ref': reference,
+            }), 422
 
     return jsonify({'status': 'error', 'message': f'Unknown endpoint: /{action}'}), 404
