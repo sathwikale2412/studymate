@@ -12,10 +12,21 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
  */
 export async function extractPages(file) {
   const buffer = await file.arrayBuffer();
+  // destroy() belongs to the loading task, not the document proxy — holding on to the
+  // proxy and calling doc.destroy() throws "n.destroy is not a function" on every file.
+  // isEvalSupported:false keeps the parser out of `new Function`, which the site's CSP
+  // forbids anyway; the font and cmap folders are copied into public/pdfjs at build time.
+  const loadingTask = pdfjsLib.getDocument({
+    data: buffer,
+    isEvalSupported: false,
+    standardFontDataUrl: '/pdfjs/standard_fonts/',
+    cMapUrl: '/pdfjs/cmaps/'
+  });
   let doc;
   try {
-    doc = await pdfjsLib.getDocument({ data: buffer }).promise;
+    doc = await loadingTask.promise;
   } catch (err) {
+    await loadingTask.destroy().catch(() => {});
     if (err?.name === 'PasswordException') {
       throw new Error(`"${file.name}" is password-protected. Remove the password and try again.`);
     }
@@ -32,7 +43,7 @@ export async function extractPages(file) {
       page.cleanup();
     }
   } finally {
-    await doc.destroy();
+    await loadingTask.destroy();
   }
 
   const characters = pages.reduce((sum, entry) => sum + entry.text.trim().length, 0);
