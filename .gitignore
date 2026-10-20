@@ -1,0 +1,23 @@
+# Node
+node_modules
+dist
+*.local
+
+# Local secrets — only the template is tracked
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+api/__pycache__/
+
+# Virtual environments and downloaded weights for the desktop Streamlit version.
+.venv/
+venv/
+streamlit_app/.cache/
+*.safetensors
+
+.vercel
+.netlify
