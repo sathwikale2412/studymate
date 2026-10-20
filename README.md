@@ -61,9 +61,24 @@ backend URL to configure.
 | `/api/translate` | POST | `{text, target, source?}` | `{status, translated, target}` |
 | `/api/flowchart` | POST | `{code}` | `{status, mermaid}` |
 
-Anything else is a `404` with a message. An empty question is `400`, text over 5000 characters is
-`413`, invalid Python is `400`, and a translator failure is `502` — the caller always gets a
-reason rather than a stack trace.
+Anything else is a `404` with a message. An empty question is `400`, a question over 4000
+characters or text over 5000 characters is `413`, invalid Python is `400`, and a translator
+failure is `502`.
+
+Every failure — including a model call that dies mid-request — answers with one sentence and
+a `ref` such as `"ref": "4c9a1f02"`. The exception never reaches the browser: a `requests`
+error repeats the URL it aimed at, and both the translation and model URLs carry a key in
+the query string. The detail goes to the Vercel function log; quote the `ref` when reporting
+it. If the model call fails, `/api/answer` still returns the closest passage and says so in
+`mode: "extractive"` rather than failing.
+
+Helper calls are limited to **30 per minute per address**, because `/api/answer` spends a real
+model call and the site lets anyone post to it. The counter lives in one warm instance, so it
+slows a scripted visitor rather than guaranteeing a ceiling.
+
+```bash
+python api/test_gateway.py   # 18 checks — limits, fallbacks, generic errors; no keys needed
+```
 
 ## Setup
 
