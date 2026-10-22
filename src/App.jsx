@@ -134,13 +134,18 @@ export default function App() {
       });
 
       if (userId) {
-        await saveQuestion({
-          user_id: userId,
-          question: question.trim(),
-          answer: data.answer,
-          mode: data.mode,
-          sources: (data.passages ?? passages).map((p) => ({ page: p.page ?? null, file: p.file ?? null }))
-        });
+        // The answer is already on screen; a failed history write must not hide it.
+        try {
+          await saveQuestion({
+            user_id: userId,
+            question: question.trim(),
+            answer: data.answer,
+            mode: data.mode,
+            sources: (data.passages ?? passages).map((p) => ({ page: p.page ?? null, file: p.file ?? null }))
+          });
+        } catch (syncErr) {
+          setError(syncErr.message);
+        }
         fetchQuestions(userId).then(setHistory);
       }
     } catch (err) {

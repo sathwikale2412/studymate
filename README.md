@@ -126,7 +126,11 @@ build settings live inside each service object rather than at the top level.
   and the page numbers it was based on.
 
 Both are `RLS`-enabled and every policy compares `auth.uid()` to `user_id`, so a signed-in user
-can only ever read their own rows.
+can only ever read their own rows. Only `SELECT` and `INSERT` are granted — a question that was
+once saved cannot be edited or erased afterwards — and `asked_at` / `logged_at` come from a
+`before insert` trigger rather than `default now()`, which only applies when the client leaves
+the column out. `supabase/harden-records.sql` brings a database created before that change up
+to the same shape.
 
 Writes go **from the browser with the user's JWT**, never from the serverless function. The
 function only holds the public anon key, which carries no identity, so `auth.uid()` is `null`

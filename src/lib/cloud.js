@@ -50,7 +50,11 @@ export async function fetchLoginHistory(userId) {
 export async function saveQuestion(entry) {
   if (!supabase) return;
   const { error } = await supabase.from('studymate_questions').insert(entry);
-  if (error) console.error('Failed to save the question', error.message);
+  if (error) {
+    console.error('Failed to save the question', error.message);
+    // Generic wording: the raw Postgres message names tables and policies.
+    throw new Error('This answer is shown, but it was not added to your question history.');
+  }
 }
 
 export async function fetchQuestions(userId, limit = 15) {
