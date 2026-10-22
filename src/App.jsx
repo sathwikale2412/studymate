@@ -39,7 +39,7 @@ function formatTime(iso) {
 }
 
 export default function App() {
-  const { ready, cloudEnabled, userId, email, isGuest, signOut } = useAuth();
+  const { ready, cloudEnabled, userId, email, isGuest, signOut, exitGuest } = useAuth();
 
   const [tab, setTab] = useState('pdf');
   const [busy, setBusy] = useState(false);
@@ -260,7 +260,12 @@ export default function App() {
               <button type="button" className="btn" onClick={signOut}>Sign out</button>
             </>
           ) : (
-            <span className="badge">guest — nothing is saved</span>
+            <>
+              <span className="badge">guest — nothing is saved</span>
+              {cloudEnabled && (
+                <button type="button" className="btn" onClick={exitGuest}>Sign in</button>
+              )}
+            </>
           )}
         </div>
       </header>

@@ -84,6 +84,15 @@ export function AuthProvider({ children }) {
     setIsGuest(true);
   }, []);
 
+  const exitGuest = useCallback(() => {
+    try {
+      localStorage.removeItem(GUEST_KEY);
+    } catch {
+      /* ignore */
+    }
+    setIsGuest(false);
+  }, []);
+
   const value = {
     ready,
     cloudEnabled: isSupabaseConfigured,
@@ -93,7 +102,8 @@ export function AuthProvider({ children }) {
     signIn,
     signUp,
     signOut,
-    continueAsGuest
+    continueAsGuest,
+    exitGuest
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
